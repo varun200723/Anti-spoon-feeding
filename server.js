@@ -7,6 +7,12 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const app = express();
 const PORT = process.env.PORT || 3000;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const GEMINI_MODEL_CANDIDATES = [...new Set([
+  GEMINI_MODEL,
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+])];
 
 // ─── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors());
@@ -166,11 +172,7 @@ app.post("/api/chat", async (req, res) => {
 
     // Send the latest user message
     const lastMessage = messages[messages.length - 1];
-    const modelCandidates = [...new Set([
-      GEMINI_MODEL,
-      "gemini-2.5-flash-lite",
-      "gemini-2.0-flash",
-    ])];
+    const modelCandidates = GEMINI_MODEL_CANDIDATES;
     let result;
     let activeModel;
 
@@ -239,8 +241,8 @@ app.post("/api/chat", async (req, res) => {
 
     if (errorStatus === 404 || normalizedError.includes("not found") || normalizedError.includes("not_found")) {
       return res.status(502).json({
-        error: `The configured Gemini model (${GEMINI_MODEL}) is unavailable for this API key.`,
-        configHint: "Set GEMINI_MODEL to a model enabled for your Gemini API key.",
+        error: `None of the configured Gemini models are available for this API key: ${GEMINI_MODEL_CANDIDATES.join(", ")}.`,
+        configHint: "Enable the Generative Language API for the key's Google Cloud project or create a new Gemini API key.",
       });
     }
 
