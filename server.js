@@ -157,18 +157,6 @@ app.post("/api/chat", async (req, res) => {
     }
     const intent = classifyIntent(latestText);
 
-    // Initialize Gemini model with system instruction
-    const model = genAI.getGenerativeModel({
-      model: GEMINI_MODEL,
-      systemInstruction: SOCRATIC_SYSTEM_PROMPT,
-      generationConfig: {
-        temperature: 0.7,
-        topK: 40,
-        topP: 0.95,
-        maxOutputTokens: 1024,
-      },
-    });
-
     // Build conversation history for Gemini (excluding the last user message)
     // Gemini expects history as alternating user/model turns
     const history = messages.slice(0, -1).map((msg) => ({
@@ -176,12 +164,42 @@ app.post("/api/chat", async (req, res) => {
       parts: [{ text: msg.parts[0].text }],
     }));
 
-    // Start chat session with history
-    const chat = model.startChat({ history });
-
     // Send the latest user message
     const lastMessage = messages[messages.length - 1];
-    const result = await chat.sendMessage(lastMessage.parts[0].text);
+    const modelCandidates = [...new Set([
+      GEMINI_MODEL,
+      "gemini-2.5-flash-lite",
+      "gemini-2.0-flash",
+    ])];
+    let result;
+    let activeModel;
+
+    for (const modelName of modelCandidates) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          systemInstruction: SOCRATIC_SYSTEM_PROMPT,
+          generationConfig: {
+            temperature: 0.7,
+            topK: 40,
+            topP: 0.95,
+            maxOutputTokens: 1024,
+          },
+        });
+        const chat = model.startChat({ history });
+        result = await chat.sendMessage(lastMessage.parts[0].text);
+        activeModel = modelName;
+        break;
+      } catch (error) {
+        const message = (error.message || String(error)).toLowerCase();
+        const modelUnavailable = error.status === 404 || message.includes("not found") || message.includes("not_found");
+        if (!modelUnavailable || modelName === modelCandidates[modelCandidates.length - 1]) {
+          throw error;
+        }
+        console.warn(`Gemini model ${modelName} is unavailable; trying the next fallback.`);
+      }
+    }
+
     if (!result.response.candidates?.length) {
       return res.status(502).json({
         error: "Gemini returned no usable response. Check the Render service logs for the provider reason.",
@@ -206,7 +224,7 @@ app.post("/api/chat", async (req, res) => {
       engineState,
       intentClassification: intent,
       meta: {
-        model: GEMINI_MODEL,
+        model: activeModel,
         turns: messages.length,
       },
     });
