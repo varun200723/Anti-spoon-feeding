@@ -151,7 +151,11 @@ app.post("/api/chat", async (req, res) => {
 
     // Classify the latest user message
     const latestUserMessage = [...messages].reverse().find((m) => m.role === "user");
-    const intent = latestUserMessage ? classifyIntent(latestUserMessage.parts[0].text) : { isHarvesting: false };
+    const latestText = latestUserMessage?.parts?.[0]?.text;
+    if (typeof latestText !== "string" || latestText.trim() === "") {
+      return res.status(400).json({ error: "A user message with text is required." });
+    }
+    const intent = classifyIntent(latestText);
 
     // Initialize Gemini model with system instruction
     const model = genAI.getGenerativeModel({
@@ -178,6 +182,11 @@ app.post("/api/chat", async (req, res) => {
     // Send the latest user message
     const lastMessage = messages[messages.length - 1];
     const result = await chat.sendMessage(lastMessage.parts[0].text);
+    if (!result.response.candidates?.length) {
+      return res.status(502).json({
+        error: "Gemini returned no usable response. Check the Render service logs for the provider reason.",
+      });
+    }
     const responseText = result.response.text();
 
     // Parse the engine state from the response marker
@@ -202,31 +211,37 @@ app.post("/api/chat", async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Gemini API Error:", error.message || error);
+    const errorMessage = error.message || String(error);
+    const errorStatus = Number(error.status || error.code);
+    const normalizedError = errorMessage.toLowerCase();
+    console.error("Gemini API Error:", {
+      status: errorStatus || undefined,
+      message: errorMessage,
+    });
 
-    if (error.message?.includes("not found") || error.message?.includes("NOT_FOUND")) {
+    if (errorStatus === 404 || normalizedError.includes("not found") || normalizedError.includes("not_found")) {
       return res.status(502).json({
         error: `The configured Gemini model (${GEMINI_MODEL}) is unavailable for this API key.`,
         configHint: "Set GEMINI_MODEL to a model enabled for your Gemini API key.",
       });
     }
 
-    if (error.message?.includes("API_KEY_INVALID") || error.message?.includes("API key not valid")) {
+    if (errorStatus === 401 || errorStatus === 403 || normalizedError.includes("api_key_invalid") || normalizedError.includes("api key not valid")) {
       return res.status(401).json({
         error: "Invalid Gemini API Key. Please check your .env file.",
         configHint: "Get your free key at https://aistudio.google.com/app/apikey",
       });
     }
 
-    if (error.message?.includes("quota") || error.message?.includes("RESOURCE_EXHAUSTED")) {
+    if (errorStatus === 429 || normalizedError.includes("quota") || normalizedError.includes("resource_exhausted")) {
       return res.status(429).json({
         error: "API quota exceeded. Please try again in a moment.",
       });
     }
 
     res.status(500).json({
-      error: "The Socratic Engine encountered an error. Please try again.",
-      details: process.env.NODE_ENV === "development" ? error.message : undefined,
+      error: "The Gemini request failed. Check the Render service logs for details.",
+      errorCode: errorStatus || "UNKNOWN_GEMINI_ERROR",
     });
   }
 });
