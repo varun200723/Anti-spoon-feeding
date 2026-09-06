@@ -6,12 +6,13 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
 const GEMINI_MODEL_CANDIDATES = [...new Set([
   GEMINI_MODEL,
-  "gemini-2.5-flash-lite",
-  "gemini-2.0-flash",
   "gemini-1.5-flash",
+  "gemini-2.0-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash",
 ])];
 
 // ─── Middleware ────────────────────────────────────────────────────────────────
@@ -194,8 +195,16 @@ app.post("/api/chat", async (req, res) => {
         break;
       } catch (error) {
         const message = (error.message || String(error)).toLowerCase();
-        const modelUnavailable = error.status === 404 || message.includes("not found") || message.includes("not_found");
-        if (!modelUnavailable || modelName === modelCandidates[modelCandidates.length - 1]) {
+        const isModelUnavailable =
+          error.status === 404 ||
+          error.status === 400 ||
+          message.includes("not found") ||
+          message.includes("not_found") ||
+          message.includes("unavailable for this api key") ||
+          message.includes("failed_precondition") ||
+          message.includes("is not supported") ||
+          message.includes("does not exist");
+        if (!isModelUnavailable || modelName === modelCandidates[modelCandidates.length - 1]) {
           throw error;
         }
         console.warn(`Gemini model ${modelName} is unavailable; trying the next fallback.`);
@@ -239,10 +248,17 @@ app.post("/api/chat", async (req, res) => {
       message: errorMessage,
     });
 
-    if (errorStatus === 404 || normalizedError.includes("not found") || normalizedError.includes("not_found")) {
+    if (
+      errorStatus === 404 ||
+      normalizedError.includes("not found") ||
+      normalizedError.includes("not_found") ||
+      normalizedError.includes("unavailable for this api key") ||
+      normalizedError.includes("failed_precondition") ||
+      normalizedError.includes("is not supported")
+    ) {
       return res.status(502).json({
-        error: `None of the configured Gemini models are available for this API key: ${GEMINI_MODEL_CANDIDATES.join(", ")}.`,
-        configHint: "Enable the Generative Language API for the key's Google Cloud project or create a new Gemini API key.",
+        error: `The configured Gemini model is not available for this API key. The engine tried: ${GEMINI_MODEL_CANDIDATES.join(", ")}.`,
+        configHint: "Your free Gemini API key supports gemini-1.5-flash. Make sure GEMINI_MODEL is not overridden to a restricted model.",
       });
     }
 
