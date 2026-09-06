@@ -241,6 +241,11 @@ app.get("/chat", (req, res) => {
   res.sendFile(path.join(__dirname, "chat.html"));
 });
 
+// Fallback for client-side routes
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "code.html"));
+});
+
 // ─── Start Server ──────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`
