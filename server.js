@@ -6,6 +6,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
 // ─── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors());
@@ -127,7 +128,7 @@ app.get("/api/health", (req, res) => {
   res.json({
     status: "operational",
     engine: "Anti-Spoon-Feeding Socratic Engine v1.0",
-    model: "gemini-1.5-flash",
+    model: GEMINI_MODEL,
     timestamp: new Date().toISOString(),
   });
 });
@@ -154,7 +155,7 @@ app.post("/api/chat", async (req, res) => {
 
     // Initialize Gemini model with system instruction
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
+      model: GEMINI_MODEL,
       systemInstruction: SOCRATIC_SYSTEM_PROMPT,
       generationConfig: {
         temperature: 0.7,
@@ -196,12 +197,19 @@ app.post("/api/chat", async (req, res) => {
       engineState,
       intentClassification: intent,
       meta: {
-        model: "gemini-1.5-flash",
+        model: GEMINI_MODEL,
         turns: messages.length,
       },
     });
   } catch (error) {
-    console.error("Gemini API Error:", error);
+    console.error("Gemini API Error:", error.message || error);
+
+    if (error.message?.includes("not found") || error.message?.includes("NOT_FOUND")) {
+      return res.status(502).json({
+        error: `The configured Gemini model (${GEMINI_MODEL}) is unavailable for this API key.`,
+        configHint: "Set GEMINI_MODEL to a model enabled for your Gemini API key.",
+      });
+    }
 
     if (error.message?.includes("API_KEY_INVALID") || error.message?.includes("API key not valid")) {
       return res.status(401).json({
